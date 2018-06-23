@@ -1,4 +1,5 @@
 library(dplyr)
+library(rvest)
 library(lubridate)
 library(stringr)
 
@@ -10,42 +11,52 @@ selic <- function(from = NULL, to = NULL) {
         stop("A data deve ser especificada no formato yyyy-mm-dd")
     }
 
-    link <- "https://www.bcb.gov.br/Pec/Copom/Port/taxaSelic.asp"
+    # Taxa Selic Diaria
+    link1 <- "http://api.bcb.gov.br/dados/serie/bcdata.sgs.11/dados?formato=csv"
+    tsd <- read.csv2(link1)
+    tsd$data <- as.Date(tsd$data, "%d/%m/%Y")
+    tsd$Y <- format(tsd$data, "%Y")
+    tsd$YM <- format(tsd$data, "%m-%Y")
 
-    while (TRUE) {
-        x <- suppressWarnings(
-            suppressMessages(
-                try(htmltab::htmltab(link), silent = TRUE)
-        ))
-        if (exists("x")) {
-            if (colnames(x)[1] != "V1" & class(x) != "try-error") {
-                break
-            }
-        }
-    }
+    # Historico da Taxa Selic
+    link2 <- "https://www.bcb.gov.br/Pec/Copom/Port/taxaSelic.asp"
 
-    x <- x[, c(1:4, 6)]
-    colnames(x) <- c("reu", "dtreu", "pervig", "metaselic", "selicaa")
+    hts <- read_html(link2)
+    hts <- html_table(html_nodes(hts, "table")[[1]], fill = TRUE,
+                      header = FALSE)
 
-    selic <- x %>%
-        mutate(reu = as.integer(gsub("[[:punct:]]|[ª]|[A-z]", "", reu)),
-               dtreu = as.Date(dtreu, "%d/%m/%Y"),
-               metaselic = as.numeric(gsub("[,]", ".", metaselic)),
-               selicaa = as.numeric(gsub("[,]", ".", selicaa))) %>%
-        filter(dtreu >= from & dtreu <= to)
+    colnames(hts) <- c("reuniao", "data_reuniao","ex1",
+                       "periodo_vigencia", "meta_selic_aa", "ex2",
+                       "ex3", "selic_aa")
 
-    selic$qtpervig <- difftime(
-        as.Date(trimws(str_extract(selic$pervig,
+    hts <- hts[, c(1:2, 4:5, 8)]
+    hts <- hts[-c(1, 2), ]
+
+    hts <- hts %>%
+        mutate(reuniao = as.integer(gsub("[[:punct:]]|[ª]|[A-z]", "",
+                                         reuniao)),
+               data_reuniao = as.Date(data_reuniao, "%d/%m/%Y"),
+               meta_selic_aa = as.numeric(gsub("[,]", ".", meta_selic_aa)),
+               selic_aa = as.numeric(gsub("[,]", ".", selic_aa))) %>%
+        filter(data_reuniao >= from & data_reuniao <= to)
+
+    hts$periodo_vigencia_dias <- difftime(
+        as.Date(trimws(str_extract(hts$periodo_vigencia,
                                    " [0-9]{2}/[0-9]{2}/[0-9]{4}")),
                 "%d/%m/%Y"),
-        as.Date(str_extract(selic$pervig,
+        as.Date(str_extract(hts$periodo_vigencia,
                             "[0-9]{2}/[0-9]{2}/[0-9]{4}"),
                 "%d/%m/%Y"))
 
-    colnames(selic) <- c("reuniao", "dt_reuniao", "periodo_vigencia",
-                         "metaselic", "selic", "periodo_vigencia_dias")
-
-    selic <- selic[, c(1:3, 6, 4:5)]
-
-    selic
+    list(selic = tsd,
+         historico = hts)
 }
+
+
+x <- selic()
+
+names(x)
+
+head(x$selic)
+
+head(x$historico)
